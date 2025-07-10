@@ -23,6 +23,10 @@ on:
         description: "Clone URL of your toolchain"
         required: true
         default: 'https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-15.0.0_r1/clang-r522817.tar.gz'
+      ANYKERNEL:
+        description: "Clone URL of your AnyKernel"
+        required: true
+        default: 'https://github.com/aosp-realm/AnyKernel3.git -b master'
 
 jobs:
   Build_Kernel:
@@ -106,7 +110,7 @@ jobs:
           end=$(date +"%s")
           echo "BUILD COMPLETED IN $((end - start)) SECONDS"
 
-      - name: Packing flashable zip
+      - name: Packing flashable zip with AnyKernel
         run: |
           cd "${{ env.OBJDIR }}"
 
@@ -114,25 +118,29 @@ jobs:
           DTBO="arch/arm64/boot/dtbo.img"
           DTB="arch/arm64/boot/dts/qcom/sdmmagpie-odessa-base.dtb"
 
-          if [[ -f "$IMAGE" && -f "$DTBO" && -f "$DTB" ]]; then
-              mkdir -p temp_zip
-              cp "$IMAGE" temp_zip/Image.gz
-              cp "$DTBO" temp_zip/dtbo.img
-              cp "$DTB" temp_zip/dtb
+          if [[ -f "$IMAGE" || -f "${IMAGE%.gz}" ]]; then
+              git clone --depth=1 --single-branch ${{ github.event.inputs.ANYKERNEL }} anykernel
 
-              cp -r ${{ github.workspace }}/META-INF temp_zip/
-              cp -r ${{ github.workspace }}/tools temp_zip/
-              cp -r ${{ github.workspace }}/version temp_zip/
-              cp ${{ github.workspace }}/anykernel.sh temp_zip/
+              # copia os arquivos que existirem pro anykernel
+              if [[ -f "$IMAGE" ]]; then
+                  cp "$IMAGE" anykernel/Image.gz
+                  cp "$IMAGE" "${{ env.OUTPUT_DIR }}/Image.gz" || true
+              elif [[ -f "${IMAGE%.gz}" ]]; then
+                  cp "${IMAGE%.gz}" anykernel/Image
+                  cp "${IMAGE%.gz}" "${{ env.OUTPUT_DIR }}/Image" || true
+              fi
 
-              cd temp_zip
-              ZIP_NAME="${{ github.event.inputs.KERNEL_NAME }}-$(date +%d%m%Y).zip"
-              zip -r9 "$ZIP_NAME" META-INF version anykernel.sh tools Image.gz dtb dtbo.img
-              mv "$ZIP_NAME" "${{ env.OUTPUT_DIR }}/"
+              [[ -f "$DTBO" ]] && cp "$DTBO" anykernel/dtbo.img && cp "$DTBO" "${{ env.OUTPUT_DIR }}/dtbo.img" || true
+              [[ -f "$DTB" ]] && cp "$DTB" anykernel/dtb && cp "$DTB" "${{ env.OUTPUT_DIR }}/dtb" || true
+
+              cd anykernel
+              zip -r9 AnyKernel.zip *
+              mv AnyKernel.zip "${{ env.ZIP_NAME }}"
+              mv "${{ env.ZIP_NAME }}" "${{ env.OUTPUT_DIR }}/"
               cd ..
-              rm -rf temp_zip
+              rm -rf anykernel
           else
-              echo "ERROR: Required file(s) missing!"
+              echo "ERROR: Kernel image missing!"
               exit 1
           fi
 
